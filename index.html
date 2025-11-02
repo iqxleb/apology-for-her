@@ -1,0 +1,373 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Извини пж :( — Апгрейд</title>
+    <!-- Загрузка Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800&display=swap');
+        body {
+            font-family: 'Inter', sans-serif;
+            overflow: hidden;
+            touch-action: manipulation;
+        }
+        /* Убедимся, что холст занимает всю доступную область */
+        #apologyCanvas {
+            position: absolute;
+            top: 0;
+            left: 0;
+            z-index: 0;
+            display: block;
+        }
+        /* Главное сообщение должно быть четко видно поверх анимации */
+        #apologyContent {
+            position: relative;
+            z-index: 10;
+        }
+    </style>
+</head>
+<body class="bg-gray-900 text-white flex items-center justify-center min-h-screen">
+
+    <!-- Глобальные переменные Firebase (Обязательно, но минимально) -->
+    <script>
+        const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+        const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : {};
+    </script>
+
+    <!-- 1. Экран Ввода Имени -->
+    <div id="inputScreen" class="p-6 max-w-sm w-full bg-gray-800 rounded-xl shadow-2xl transition-opacity duration-500 z-20">
+        <h1 class="text-3xl font-extrabold text-pink-400 mb-6 text-center">Важное Сообщение</h1>
+        <p class="text-gray-300 mb-4 text-center">Пожалуйста, введи свое имя:</p>
+        <input type="text" id="nameInput" placeholder="Твое имя" class="w-full p-3 mb-6 border border-pink-500 bg-gray-700 text-white rounded-lg focus:ring-pink-500 focus:border-pink-500 transition duration-150 text-center">
+        <button id="startApology" class="w-full py-3 bg-pink-600 hover:bg-pink-700 text-white font-bold rounded-lg shadow-lg transform hover:scale-[1.02] transition duration-200">
+            Открыть
+        </button>
+    </div>
+
+    <!-- 2. Основной Экран Извинения -->
+    <div id="apologyScreen" class="hidden absolute inset-0 flex items-center justify-center text-center p-4 w-full h-full">
+        <!-- Холст для анимации -->
+        <canvas id="apologyCanvas"></canvas>
+
+        <!-- Сообщение -->
+        <div id="apologyContent" class="bg-gray-900/70 p-8 md:p-12 rounded-2xl shadow-2xl backdrop-blur-sm border border-pink-500/50 max-w-lg mx-auto transform scale-100 transition-transform duration-500">
+            <p id="apologyName" class="text-4xl md:text-6xl font-extrabold text-pink-400 mb-4 transform scale-y-110">
+                <!-- Имя будет здесь -->
+            </p>
+            <p class="text-3xl md:text-5xl font-extrabold text-red-300 tracking-wider animate-pulse">
+                Извини пж :(
+            </p>
+        </div>
+    </div>
+
+    <script type="module">
+        // --- 1. FIREBASE/AUTH (Мандатная настройка) ---
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getFirestore } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+
+        // Минимальная инициализация
+        let isAuthReady = false;
+        try {
+            if (Object.keys(firebaseConfig).length > 0) {
+                const app = initializeApp(firebaseConfig);
+                const auth = getAuth(app);
+                onAuthStateChanged(auth, async (user) => {
+                    if (!user) {
+                        const token = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
+                        if (token) { await signInWithCustomToken(auth, token); } else { await signInAnonymously(auth); }
+                    }
+                    isAuthReady = true;
+                });
+            } else {
+                isAuthReady = true; // Запускаем без Firebase
+            }
+        } catch (e) {
+            console.error("Failed to initialize Firebase:", e);
+        }
+
+        // --- 2. ЛОГИКА ЭКРАНОВ И ПЕРЕХОДОВ ---
+        const inputScreen = document.getElementById('inputScreen');
+        const apologyScreen = document.getElementById('apologyScreen');
+        const nameInput = document.getElementById('nameInput');
+        const startApologyButton = document.getElementById('startApology');
+        const apologyNameDisplay = document.getElementById('apologyName');
+        const apologyContent = document.getElementById('apologyContent');
+
+        startApologyButton.addEventListener('click', () => {
+            const name = nameInput.value.trim();
+            if (name) {
+                // Переход: Скрытие экрана ввода
+                inputScreen.style.opacity = '0';
+                setTimeout(() => {
+                    inputScreen.classList.add('hidden');
+                    
+                    // Показ экрана извинения
+                    apologyNameDisplay.textContent = `${name},`;
+                    apologyScreen.classList.remove('hidden');
+                    
+                    // Эффект "бум" для сообщения
+                    apologyContent.style.transform = 'scale(1.1)';
+                    setTimeout(() => {
+                         apologyContent.style.transform = 'scale(1)';
+                    }, 100);
+
+                    // Запуск анимации
+                    startParticleAnimation();
+                }, 500);
+            } else {
+                nameInput.classList.add('border-red-500', 'ring-2', 'ring-red-500');
+                setTimeout(() => {
+                    nameInput.classList.remove('border-red-500', 'ring-2', 'ring-red-500');
+                }, 1000);
+            }
+        });
+
+        // --- 3. ЛОГИКА АНИМАЦИИ НА CANVAS ---
+        const canvas = document.getElementById('apologyCanvas');
+        const ctx = canvas ? canvas.getContext('2d') : null;
+        
+        let particles = [];
+        let centerX, centerY;
+        
+        // Переменные для анимации сердца
+        let heartPoints = [];
+        let wireframeLinesDrawn = 0;
+        const TOTAL_WIREFRAME_LINES = 200; 
+        const DRAW_SPEED = 1.0; 
+
+        // Установка размеров холста
+        function resizeCanvas() {
+            if (!canvas) return;
+            canvas.width = window.innerWidth;
+            canvas.height = window.innerHeight;
+            centerX = canvas.width / 2;
+            centerY = canvas.height / 2;
+            
+            // Пересчитываем точки сердца при изменении размера
+            calculateHeartPoints();
+        }
+        window.addEventListener('resize', resizeCanvas);
+        
+        // Параметрические уравнения сердца
+        function heartX(t) {
+            return 16 * Math.pow(Math.sin(t), 3);
+        }
+        function heartY(t) {
+            return 13 * Math.cos(t) - 5 * Math.cos(2 * t) - 2 * Math.cos(3 * t) - Math.cos(4 * t);
+        }
+
+        // Вычисляем и сохраняем точки контура сердца
+        function calculateHeartPoints() {
+            if (!ctx) return;
+            heartPoints = [];
+            
+            // Масштаб уменьшен (с /14 на /16)
+            const scale = Math.min(canvas.width, canvas.height) / 16; 
+            const wireframeCenterX = canvas.width / 2;
+            const wireframeCenterY = canvas.height / 2;
+            
+            // Используем 200 точек
+            const step = (2 * Math.PI) / TOTAL_WIREFRAME_LINES;
+
+            for (let i = 0; i <= TOTAL_WIREFRAME_LINES; i++) {
+                const t = i * step;
+                const x = heartX(t) * scale / 2 + wireframeCenterX;
+                const y = -heartY(t) * scale / 2 + wireframeCenterY;
+                heartPoints.push({ x, y });
+            }
+        }
+        
+        // Функция для рисования СТАТИЧНОГО сердца из нитки (контур + анимированные линии)
+        function drawWireframeHeart() {
+            if (!ctx || heartPoints.length === 0) return;
+
+            const wireframeCenterX = canvas.width / 2;
+            const wireframeCenterY = canvas.height / 2;
+
+            ctx.shadowColor = '#FF69B4';
+            ctx.shadowBlur = 10;
+            
+            // 1. Рисование контура сердца (статика)
+            ctx.strokeStyle = '#FF69B4'; 
+            ctx.lineWidth = 1;
+            ctx.beginPath();
+            if (heartPoints.length > 0) {
+                ctx.moveTo(heartPoints[0].x, heartPoints[0].y);
+                for (let i = 1; i < heartPoints.length; i++) {
+                    ctx.lineTo(heartPoints[i].x, heartPoints[i].y);
+                }
+            }
+            ctx.closePath();
+            ctx.stroke();
+
+            // 2. Анимированное рисование внутренних ниток
+            ctx.strokeStyle = 'rgba(255, 105, 180, 0.8)'; // СДЕЛАНО ЯРЧЕ (0.8)
+            ctx.lineWidth = 0.5; // СДЕЛАНО ТОЛЩЕ (0.5)
+            
+            const linesToDraw = Math.min(TOTAL_WIREFRAME_LINES, Math.floor(wireframeLinesDrawn));
+
+            for (let i = 0; i < linesToDraw; i++) {
+                const point = heartPoints[i];
+
+                ctx.beginPath();
+                // Линия идет из центра
+                ctx.moveTo(wireframeCenterX, wireframeCenterY);
+                // В точку на контуре
+                ctx.lineTo(point.x, point.y);
+                ctx.stroke();
+            }
+
+            // Сброс теней
+            ctx.shadowBlur = 0;
+            ctx.shadowColor = 'transparent';
+        }
+
+
+        // Функция для рисования маленького сердца (для частиц)
+        function drawParticleHeart(x, y, size, color) {
+            if (!ctx) return;
+            ctx.fillStyle = color;
+            ctx.beginPath();
+
+            // Оптимизированный расчет параметрического сердца
+            for (let t = 0; t <= 2 * Math.PI; t += 0.3) {
+                const px = 16 * Math.pow(Math.sin(t), 3);
+                const py = 13 * Math.cos(t) - 5 * Math.cos(2 * t) - 2 * Math.cos(3 * t) - Math.cos(4 * t);
+
+                const currentX = x + px * size / 22;
+                const currentY = y - py * size / 22;
+
+                if (t === 0) {
+                    ctx.moveTo(currentX, currentY);
+                } else {
+                    ctx.lineTo(currentX, currentY);
+                }
+            }
+            ctx.closePath();
+            ctx.fill();
+        }
+
+        // Класс Частицы (не изменен)
+        class Particle {
+            constructor() {
+                this.type = Math.random() < 0.5 ? 'heart' : 'balloon';
+                this.x = centerX; // Все начинается из центра
+                this.y = centerY; // Все начинается из центра
+                this.size = this.type === 'heart' ? Math.random() * 6 + 3 : Math.random() * 10 + 6;
+                this.color = this.getRandomColor(this.type);
+                this.alpha = 1;
+                this.life = 0;
+                this.maxLife = 300 + Math.random() * 200;
+
+                const angle = Math.random() * 2 * Math.PI;
+                const speed = Math.random() * 2 + 1; 
+
+                this.vx = Math.cos(angle) * speed;
+                this.vy = Math.sin(angle) * speed - 2; 
+            }
+
+            getRandomColor(type) {
+                if (type === 'heart') {
+                    const colors = ['#FF69B4', '#FF1493', '#E74C3C', '#F73487'];
+                    return colors[Math.floor(Math.random() * colors.length)];
+                } else {
+                    const colors = ['#3498DB', '#2ECC71', '#F1C40F', '#9B59B6', '#E67E22']; 
+                    return colors[Math.floor(Math.random() * colors.length)];
+                }
+            }
+
+            update() {
+                this.x += this.vx;
+                this.y += this.vy;
+                this.life++;
+
+                this.vx *= 0.99;
+                this.vy *= 0.99;
+                this.vy -= 0.05; 
+
+                this.alpha = 1 - (this.life / this.maxLife);
+                if (this.alpha < 0) this.alpha = 0;
+            }
+
+            draw() {
+                if (!ctx) return;
+                ctx.globalAlpha = this.alpha;
+
+                if (this.type === 'heart') {
+                    drawParticleHeart(this.x, this.y, this.size, this.color);
+                } else {
+                    // Рисование шарика
+                    ctx.fillStyle = this.color;
+                    ctx.beginPath();
+                    ctx.arc(this.x, this.y, this.size, 0, Math.PI * 2);
+                    ctx.fill();
+
+                    // Нитка
+                    ctx.strokeStyle = this.color;
+                    ctx.lineWidth = 0.5;
+                    ctx.beginPath();
+                    ctx.moveTo(this.x, this.y + this.size);
+                    ctx.lineTo(this.x, this.y + this.size + 15);
+                    ctx.stroke();
+                }
+
+                ctx.globalAlpha = 1;
+            }
+        }
+
+        // Основной цикл анимации
+        function animate() {
+            if (!ctx) return;
+
+            requestAnimationFrame(animate);
+            ctx.clearRect(0, 0, canvas.width, canvas.height); 
+            
+            // Медленно рисуем линии сердца
+            if (wireframeLinesDrawn < TOTAL_WIREFRAME_LINES) {
+                wireframeLinesDrawn += DRAW_SPEED;
+            }
+            
+            // ПЕРЕРИСОВЫВАЕМ СТАТИЧНОЕ СЕРДЦЕ И АНИМИРОВАННЫЕ ЛИНИИ
+            drawWireframeHeart(); 
+
+            // Непрерывное добавление новых частиц
+            if (Math.random() < 0.3) { 
+                particles.push(new Particle());
+            }
+
+            // Обновление и отрисовка частиц
+            particles = particles.filter((p, index) => {
+                p.update();
+                p.draw();
+                return p.alpha > 0 && p.y > -p.size && p.x > -p.size && p.x < canvas.width + p.size;
+            });
+        }
+
+        // Запуск анимации
+        function startParticleAnimation() {
+            if (!ctx) {
+                console.error("Animation context is missing. Cannot start animation.");
+                return;
+            }
+            // Начальный "взрыв" частиц
+            for(let i = 0; i < 50; i++) { 
+                particles.push(new Particle());
+            }
+            
+            // Запускаем расчет точек и анимацию
+            calculateHeartPoints();
+            animate();
+        }
+        
+        // Инициализация при загрузке
+        window.onload = function() {
+            resizeCanvas(); 
+        }
+
+    </script>
+</body>
+</html>
+
